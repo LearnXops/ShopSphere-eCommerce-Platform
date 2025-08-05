@@ -1,132 +1,163 @@
 package utils
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq" // PostgreSQL driver
+	_ "github.com/lib/pq"
 )
 
-// DatabaseConfig holds database configuration
+// DatabaseConfig holds database connection configuration
 type DatabaseConfig struct {
-	Host            string
-	Port            int
-	Database        string
-	Username        string
-	Password        string
-	SSLMode         string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-	ConnMaxIdleTime time.Duration
+	Host     string
+	Port     int
+	User     string
+	Password string
+	DBName   string
+	SSLMode  string
 }
 
-// DefaultDatabaseConfig returns default database configuration
-func DefaultDatabaseConfig() DatabaseConfig {
-	return DatabaseConfig{
-		Host:            "localhost",
-		Port:            5432,
-		SSLMode:         "disable",
-		MaxOpenConns:    25,
-		MaxIdleConns:    5,
-		ConnMaxLifetime: 5 * time.Minute,
-		ConnMaxIdleTime: 5 * time.Minute,
+// NewDatabaseConfig creates a new database configuration with defaults
+func NewDatabaseConfig() *DatabaseConfig {
+	return &DatabaseConfig{
+		Host:    "localhost",
+		Port:    5432,
+		User:    "shopsphere",
+		Password: "shopsphere123",
+		SSLMode: "disable",
 	}
 }
 
-// DatabaseConnection wraps sql.DB with additional functionality
-type DatabaseConnection struct {
-	DB     *sql.DB
-	Config DatabaseConfig
+// ConnectionString returns the PostgreSQL connection string
+func (c *DatabaseConfig) ConnectionString() string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		c.Host, c.Port, c.User, c.Password, c.DBName, c.SSLMode)
 }
 
-// NewPostgresConnection creates a new PostgreSQL connection with connection pooling
-func NewPostgresConnection(config DatabaseConfig) (*DatabaseConnection, error) {
-	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		config.Host, config.Port, config.Username, config.Password, config.Database, config.SSLMode)
-
-	db, err := sql.Open("postgres", dsn)
+// Connect establishes a connection to the PostgreSQL database
+func (c *DatabaseConfig) Connect() (*sql.DB, error) {
+	db, err := sql.Open("postgres", c.ConnectionString())
 	if err != nil {
-		return nil, NewInternalError("failed to open database connection", err)
+		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
 	// Configure connection pool
-	db.SetMaxOpenConns(config.MaxOpenConns)
-	db.SetMaxIdleConns(config.MaxIdleConns)
-	db.SetConnMaxLifetime(config.ConnMaxLifetime)
-	db.SetConnMaxIdleTime(config.ConnMaxIdleTime)
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	// Test the connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, NewInternalError("failed to ping database", err)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	return &DatabaseConnection{
-		DB:     db,
-		Config: config,
-	}, nil
+	return db, nil
 }
 
-// Close closes the database connection
-func (dc *DatabaseConnection) Close() error {
-	if dc.DB != nil {
-		return dc.DB.Close()
+// MigrateDatabase runs database migrations for a specific service
+func MigrateDatabase(serviceName string) error {
+	config := NewDatabaseConfig()
+	config.DBName = serviceName
+
+	db, err := config.Connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect to %s database: %w", serviceName, err)
 	}
+	defer db.Close()
+
+	// Create schema_migrations table if it doesn't exist
+	createMigrationsTable := `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version bigint NOT NULL PRIMARY KEY,
+			dirty boolean NOT NULL
+		);
+	`
+	
+	if _, err := db.Exec(createMigrationsTable); err != nil {
+		return fmt.Errorf("failed to create schema_migrations table: %w", err)
+	}
+
 	return nil
 }
 
-// Health checks the database connection health
-func (dc *DatabaseConnection) Health(ctx context.Context) error {
-	if dc.DB == nil {
-		return NewInternalError("database connection is nil", nil)
-	}
+// CheckDatabaseConnection verifies database connectivity
+func CheckDatabaseConnection(serviceName string) error {
+	config := NewDatabaseConfig()
+	config.DBName = serviceName
 
-	if err := dc.DB.PingContext(ctx); err != nil {
-		return NewInternalError("database ping failed", err)
+	db, err := config.Connect()
+	if err != nil {
+		return err
 	}
+	defer db.Close()
 
 	return nil
 }
 
-// Stats returns database connection statistics
-func (dc *DatabaseConnection) Stats() sql.DBStats {
-	if dc.DB == nil {
-		return sql.DBStats{}
+// DatabaseHealthCheck performs a health check on the database
+func DatabaseHealthCheck(serviceName string) (bool, error) {
+	config := NewDatabaseConfig()
+	config.DBName = serviceName
+
+	db, err := config.Connect()
+	if err != nil {
+		return false, err
 	}
-	return dc.DB.Stats()
+	defer db.Close()
+
+	// Simple query to check if database is responsive
+	var result int
+	err = db.QueryRow("SELECT 1").Scan(&result)
+	if err != nil {
+		return false, err
+	}
+
+	return result == 1, nil
 }
 
-// RedisConfig holds Redis configuration
-type RedisConfig struct {
-	Host         string
-	Port         int
-	Password     string
-	Database     int
-	MaxRetries   int
-	PoolSize     int
-	MinIdleConns int
-	DialTimeout  time.Duration
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
+// GetDatabaseVersion returns the current migration version
+func GetDatabaseVersion(serviceName string) (int64, error) {
+	config := NewDatabaseConfig()
+	config.DBName = serviceName
+
+	db, err := config.Connect()
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+
+	var version int64
+	err = db.QueryRow("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, nil // No migrations applied yet
+		}
+		return 0, err
+	}
+
+	return version, nil
 }
 
-// DefaultRedisConfig returns default Redis configuration
-func DefaultRedisConfig() RedisConfig {
-	return RedisConfig{
-		Host:         "localhost",
-		Port:         6379,
-		Database:     0,
-		MaxRetries:   3,
-		PoolSize:     10,
-		MinIdleConns: 5,
-		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
+// ExecuteInTransaction executes a function within a database transaction
+func ExecuteInTransaction(db *sql.DB, fn func(*sql.Tx) error) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
+
+	err = fn(tx)
+	return err
 }

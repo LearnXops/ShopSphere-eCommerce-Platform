@@ -12,6 +12,19 @@ help:
 	@echo "  dev-down     - Stop development environment"
 	@echo "  docker-build - Build Docker images for all services"
 	@echo "  docker-push  - Push Docker images to registry"
+	@echo ""
+	@echo "Database commands:"
+	@echo "  migrate-install - Install golang-migrate tool"
+	@echo "  migrate-up      - Run database migrations up"
+	@echo "  migrate-down    - Roll back database migrations"
+	@echo "  migrate-version - Check migration versions"
+	@echo "  migrate-create  - Create new migration (NAME=migration_name)"
+	@echo "  seed-dev        - Load development seed data"
+	@echo "  seed-test       - Load test seed data"
+	@echo "  mongo-init      - Initialize MongoDB collections"
+	@echo "  redis-config    - Apply Redis configuration"
+	@echo "  db-setup        - Complete database setup"
+	@echo "  db-reset        - Reset all databases (destructive)"
 
 # Build all services
 build:
@@ -106,4 +119,94 @@ lint:
 	@for service in auth user product cart order payment shipping review notification admin search recommendation; do \
 		cd services/$$service-service && golangci-lint run && cd ../..; \
 	done
-	@echo "Linting complete!"
+	@echo "Linting complete!"# Dat
+abase migration commands
+migrate-install:
+	@echo "Installing golang-migrate..."
+	@go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@echo "golang-migrate installed!"
+
+migrate-up:
+	@echo "Running database migrations up..."
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/user_service?sslmode=disable" up
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/product_service?sslmode=disable" up
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/order_service?sslmode=disable" up
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/review_service?sslmode=disable" up
+	@echo "Database migrations completed!"
+
+migrate-down:
+	@echo "Rolling back database migrations..."
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/review_service?sslmode=disable" down
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/order_service?sslmode=disable" down
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/product_service?sslmode=disable" down
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/user_service?sslmode=disable" down
+	@echo "Database migrations rolled back!"
+
+migrate-force:
+	@echo "Forcing migration version (use with caution)..."
+	@echo "Usage: make migrate-force VERSION=<version> SERVICE=<service>"
+	@if [ -z "$(VERSION)" ] || [ -z "$(SERVICE)" ]; then \
+		echo "Error: VERSION and SERVICE parameters are required"; \
+		echo "Example: make migrate-force VERSION=1 SERVICE=user_service"; \
+		exit 1; \
+	fi
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/$(SERVICE)?sslmode=disable" force $(VERSION)
+
+migrate-version:
+	@echo "Checking migration versions..."
+	@echo "User Service:"
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/user_service?sslmode=disable" version || echo "No migrations applied"
+	@echo "Product Service:"
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/product_service?sslmode=disable" version || echo "No migrations applied"
+	@echo "Order Service:"
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/order_service?sslmode=disable" version || echo "No migrations applied"
+	@echo "Review Service:"
+	@migrate -path migrations/postgresql -database "postgres://shopsphere:shopsphere123@localhost:5432/review_service?sslmode=disable" version || echo "No migrations applied"
+
+migrate-create:
+	@echo "Creating new migration..."
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME parameter is required"; \
+		echo "Usage: make migrate-create NAME=your_migration_name"; \
+		exit 1; \
+	fi
+	@migrate create -ext sql -dir migrations/postgresql -seq $(NAME)
+	@echo "Migration files created for: $(NAME)"
+
+# Database seeding commands
+seed-dev:
+	@echo "Loading development seed data..."
+	@docker exec -i shopsphere-postgres psql -U shopsphere -d user_service < migrations/seed/dev_seed_data.sql
+	@echo "Development seed data loaded!"
+
+seed-test:
+	@echo "Loading test seed data..."
+	@docker exec -i shopsphere-postgres psql -U shopsphere -d user_service < migrations/seed/test_seed_data.sql
+	@echo "Test seed data loaded!"
+
+# MongoDB setup commands
+mongo-init:
+	@echo "Initializing MongoDB collections..."
+	@docker exec -i shopsphere-mongodb mongosh --username shopsphere --password shopsphere123 --authenticationDatabase admin < migrations/mongodb/init-collections.js
+	@echo "MongoDB collections initialized!"
+
+# Redis setup commands
+redis-config:
+	@echo "Applying Redis configuration..."
+	@docker cp migrations/redis/redis.conf shopsphere-redis:/usr/local/etc/redis/redis.conf
+	@docker restart shopsphere-redis
+	@echo "Redis configuration applied!"
+
+# Complete database setup
+db-setup: migrate-install migrate-up mongo-init redis-config seed-dev
+	@echo "Complete database setup finished!"
+	@echo "All databases, collections, and seed data have been configured."
+
+# Reset all databases (use with caution)
+db-reset:
+	@echo "Resetting all databases..."
+	@docker-compose down -v
+	@docker-compose up -d postgres mongodb redis
+	@sleep 10
+	@make db-setup
+	@echo "Database reset complete!"
