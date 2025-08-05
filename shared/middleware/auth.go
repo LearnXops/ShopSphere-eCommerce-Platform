@@ -89,7 +89,7 @@ func (m *AuthMiddleware) writeErrorResponse(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(err.HTTPStatusCode())
 	
-	response := utils.ErrorResponse{
+	_ = utils.ErrorResponse{
 		Error: utils.ErrorDetail{
 			Code:    string(err.Code),
 			Message: err.Message,
