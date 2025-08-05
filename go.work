@@ -1,0 +1,17 @@
+go 1.21
+
+use (
+	./shared
+	./services/auth-service
+	./services/user-service
+	./services/product-service
+	./services/cart-service
+	./services/order-service
+	./services/payment-service
+	./services/shipping-service
+	./services/review-service
+	./services/notification-service
+	./services/admin-service
+	./services/search-service
+	./services/recommendation-service
+)
