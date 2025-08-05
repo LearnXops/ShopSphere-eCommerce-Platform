@@ -196,7 +196,7 @@ func setupTestRouter() *mux.Router {
 	categoryRepo := repository.NewCategoryRepository(testDB)
 
 	// Initialize services
-	productService := service.NewProductService(productRepo, categoryRepo)
+	productService := service.NewProductService(productRepo, categoryRepo, nil, nil)
 	categoryService := service.NewCategoryService(categoryRepo)
 
 	// Initialize handlers

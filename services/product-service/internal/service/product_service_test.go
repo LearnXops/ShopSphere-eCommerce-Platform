@@ -202,7 +202,7 @@ func (m *mockCategoryRepository) GetPath(ctx context.Context, categoryID string)
 func TestProductService_CreateProduct(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -238,7 +238,7 @@ func TestProductService_CreateProduct(t *testing.T) {
 func TestProductService_CreateProduct_ValidationError(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -268,7 +268,7 @@ func TestProductService_CreateProduct_ValidationError(t *testing.T) {
 func TestProductService_GetProduct(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -290,7 +290,7 @@ func TestProductService_GetProduct(t *testing.T) {
 func TestProductService_GetProduct_NotFound(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -313,7 +313,7 @@ func TestProductService_GetProduct_NotFound(t *testing.T) {
 func TestProductService_UpdateProduct(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -346,7 +346,7 @@ func TestProductService_UpdateProduct(t *testing.T) {
 func TestProductService_DeleteProduct(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -370,7 +370,7 @@ func TestProductService_DeleteProduct(t *testing.T) {
 func TestProductService_ReserveStock(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	
@@ -389,7 +389,7 @@ func TestProductService_ReserveStock(t *testing.T) {
 func TestProductService_ReserveStock_InsufficientStock(t *testing.T) {
 	productRepo := newMockProductRepository()
 	categoryRepo := newMockCategoryRepository()
-	service := NewProductService(productRepo, categoryRepo)
+	service := NewProductService(productRepo, categoryRepo, nil, nil)
 	
 	ctx := context.Background()
 	

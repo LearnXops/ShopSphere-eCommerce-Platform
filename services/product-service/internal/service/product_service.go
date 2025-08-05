@@ -4,23 +4,29 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/shopsphere/product-service/internal/repository"
+	"github.com/shopsphere/product-service/internal/search"
 	"github.com/shopsphere/shared/models"
 	"github.com/shopsphere/shared/utils"
 )
 
 // ProductService handles product business logic
 type ProductService struct {
-	productRepo  repository.ProductRepository
-	categoryRepo repository.CategoryRepository
+	productRepo     repository.ProductRepository
+	categoryRepo    repository.CategoryRepository
+	searchService   search.SearchService
+	analyticsService search.SearchAnalytics
 }
 
 // NewProductService creates a new product service
-func NewProductService(productRepo repository.ProductRepository, categoryRepo repository.CategoryRepository) *ProductService {
+func NewProductService(productRepo repository.ProductRepository, categoryRepo repository.CategoryRepository, searchService search.SearchService, analyticsService search.SearchAnalytics) *ProductService {
 	return &ProductService{
-		productRepo:  productRepo,
-		categoryRepo: categoryRepo,
+		productRepo:      productRepo,
+		categoryRepo:     categoryRepo,
+		searchService:    searchService,
+		analyticsService: analyticsService,
 	}
 }
 
@@ -63,6 +69,16 @@ func (s *ProductService) CreateProduct(ctx context.Context, req CreateProductReq
 	
 	if err := s.productRepo.Create(ctx, product); err != nil {
 		return nil, err
+	}
+	
+	// Index product in Elasticsearch
+	if s.searchService != nil {
+		if err := s.searchService.IndexProduct(ctx, product); err != nil {
+			// Log error but don't fail the operation
+			utils.Logger.Error(ctx, "Failed to index product in Elasticsearch", err, map[string]interface{}{
+				"product_id": product.ID,
+			})
+		}
 	}
 	
 	return product, nil
@@ -175,6 +191,16 @@ func (s *ProductService) UpdateProduct(ctx context.Context, id string, req Updat
 		return nil, err
 	}
 	
+	// Update product in Elasticsearch
+	if s.searchService != nil {
+		if err := s.searchService.IndexProduct(ctx, product); err != nil {
+			// Log error but don't fail the operation
+			utils.Logger.Error(ctx, "Failed to update product in Elasticsearch", err, map[string]interface{}{
+				"product_id": product.ID,
+			})
+		}
+	}
+	
 	return product, nil
 }
 
@@ -184,7 +210,21 @@ func (s *ProductService) DeleteProduct(ctx context.Context, id string) error {
 		return utils.NewValidationError("product ID is required")
 	}
 	
-	return s.productRepo.Delete(ctx, id)
+	if err := s.productRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	
+	// Delete product from Elasticsearch
+	if s.searchService != nil {
+		if err := s.searchService.DeleteProduct(ctx, id); err != nil {
+			// Log error but don't fail the operation
+			utils.Logger.Error(ctx, "Failed to delete product from Elasticsearch", err, map[string]interface{}{
+				"product_id": id,
+			})
+		}
+	}
+	
+	return nil
 }
 
 // ListProducts retrieves products with filtering and pagination
@@ -327,6 +367,104 @@ func (s *ProductService) SearchProducts(ctx context.Context, req SearchProductsR
 		req.Offset = 0
 	}
 	
+	// Use Elasticsearch if available, otherwise fallback to database search
+	if s.searchService != nil {
+		return s.searchWithElasticsearch(ctx, req)
+	}
+	
+	// Fallback to database search
+	return s.searchWithDatabase(ctx, req)
+}
+
+// searchWithElasticsearch performs search using Elasticsearch
+func (s *ProductService) searchWithElasticsearch(ctx context.Context, req SearchProductsRequest) (*ListProductsResponse, error) {
+	// Build filters
+	filters := make(map[string]interface{})
+	if req.CategoryID != "" {
+		filters["category_id"] = req.CategoryID
+	}
+	if req.Status != "" {
+		filters["status"] = req.Status
+	}
+	if req.Brand != "" {
+		filters["brand"] = req.Brand
+	}
+	if req.Color != "" {
+		filters["color"] = req.Color
+	}
+	if req.Size != "" {
+		filters["size"] = req.Size
+	}
+	if req.MinPrice != nil {
+		filters["price_min"] = *req.MinPrice
+	}
+	if req.MaxPrice != nil {
+		filters["price_max"] = *req.MaxPrice
+	}
+	if req.Featured != nil {
+		filters["featured"] = *req.Featured
+	}
+	if req.InStock != nil {
+		filters["in_stock"] = *req.InStock
+	}
+	
+	// Add custom filters
+	for k, v := range req.Filters {
+		filters[k] = v
+	}
+	
+	// Build sort
+	var sorts []search.SortField
+	if req.SortBy != "" {
+		order := "asc"
+		if req.SortOrder == "desc" {
+			order = "desc"
+		}
+		sorts = append(sorts, search.SortField{
+			Field: req.SortBy,
+			Order: order,
+		})
+	}
+	
+	// Perform search
+	searchReq := search.SearchRequest{
+		Query:   req.Query,
+		Filters: filters,
+		Sort:    sorts,
+		From:    req.Offset,
+		Size:    req.Limit,
+		Facets:  req.Facets,
+	}
+	
+	result, err := s.searchService.SearchProducts(ctx, searchReq)
+	if err != nil {
+		// Log error and fallback to database search
+		utils.Logger.Error(ctx, "Elasticsearch search failed, falling back to database", err, map[string]interface{}{
+			"query": req.Query,
+		})
+		return s.searchWithDatabase(ctx, req)
+	}
+	
+	// Record search analytics
+	if s.analyticsService != nil {
+		userID := "" // Extract from context if available
+		go func() {
+			if err := s.analyticsService.RecordSearch(context.Background(), req.Query, userID, len(result.Products)); err != nil {
+				utils.Logger.Error(context.Background(), "Failed to record search analytics", err, nil)
+			}
+		}()
+	}
+	
+	return &ListProductsResponse{
+		Products: result.Products,
+		Total:    int(result.Total),
+		Limit:    req.Limit,
+		Offset:   req.Offset,
+	}, nil
+}
+
+// searchWithDatabase performs search using database (fallback)
+func (s *ProductService) searchWithDatabase(ctx context.Context, req SearchProductsRequest) (*ListProductsResponse, error) {
 	// Build filter for search
 	filter := repository.ProductFilter{
 		SearchTerm: req.Query,
@@ -454,4 +592,217 @@ func (s *ProductService) validateListProductsRequest(req ListProductsRequest) er
 	}
 	
 	return nil
+}
+
+// AdvancedSearch performs advanced product search with facets
+func (s *ProductService) AdvancedSearch(ctx context.Context, req AdvancedSearchRequest) (*AdvancedSearchResponse, error) {
+	// Set defaults
+	if req.Size <= 0 {
+		req.Size = 20
+	}
+	if req.Size > 100 {
+		req.Size = 100
+	}
+	if req.From < 0 {
+		req.From = 0
+	}
+	
+	if s.searchService == nil {
+		return nil, utils.NewInternalError("search service not available", nil)
+	}
+	
+	// Perform search
+	searchReq := search.SearchRequest{
+		Query:   req.Query,
+		Filters: req.Filters,
+		Sort:    convertSortFields(req.Sort),
+		From:    req.From,
+		Size:    req.Size,
+		Facets:  req.Facets,
+	}
+	
+	result, err := s.searchService.SearchProducts(ctx, searchReq)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Record search analytics
+	if s.analyticsService != nil {
+		userID := "" // Extract from context if available
+		go func() {
+			if err := s.analyticsService.RecordSearch(context.Background(), req.Query, userID, len(result.Products)); err != nil {
+				utils.Logger.Error(context.Background(), "Failed to record search analytics", err, nil)
+			}
+		}()
+	}
+	
+	// Convert facets
+	facets := make(map[string][]FacetValue)
+	for k, v := range result.Facets {
+		var facetValues []FacetValue
+		for _, fv := range v {
+			facetValues = append(facetValues, FacetValue{
+				Value: fv.Value,
+				Count: fv.Count,
+			})
+		}
+		facets[k] = facetValues
+	}
+	
+	return &AdvancedSearchResponse{
+		Products: result.Products,
+		Total:    result.Total,
+		Facets:   facets,
+		From:     req.From,
+		Size:     req.Size,
+	}, nil
+}
+
+// GetSearchSuggestions returns search suggestions
+func (s *ProductService) GetSearchSuggestions(ctx context.Context, req SearchSuggestionsRequest) (*SearchSuggestionsResponse, error) {
+	if req.Query == "" {
+		return nil, utils.NewValidationError("search query is required")
+	}
+	
+	if req.Size <= 0 {
+		req.Size = 10
+	}
+	if req.Size > 20 {
+		req.Size = 20
+	}
+	
+	if s.searchService == nil {
+		return &SearchSuggestionsResponse{Suggestions: []string{}}, nil
+	}
+	
+	suggestions, err := s.searchService.GetSearchSuggestions(ctx, req.Query, req.Size)
+	if err != nil {
+		utils.Logger.Error(ctx, "Failed to get search suggestions", err, map[string]interface{}{
+			"query": req.Query,
+		})
+		return &SearchSuggestionsResponse{Suggestions: []string{}}, nil
+	}
+	
+	return &SearchSuggestionsResponse{
+		Suggestions: suggestions,
+	}, nil
+}
+
+// GetSearchAnalytics returns search analytics
+func (s *ProductService) GetSearchAnalytics(ctx context.Context, req SearchAnalyticsRequest) (*SearchAnalyticsResponse, error) {
+	if s.analyticsService == nil {
+		return nil, utils.NewInternalError("analytics service not available", nil)
+	}
+	
+	// Parse dates
+	from, err := time.Parse("2006-01-02", req.From)
+	if err != nil {
+		return nil, utils.NewValidationError("invalid from date format")
+	}
+	
+	to, err := time.Parse("2006-01-02", req.To)
+	if err != nil {
+		return nil, utils.NewValidationError("invalid to date format")
+	}
+	
+	metrics, err := s.analyticsService.GetSearchMetrics(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Convert search terms
+	var popularTerms []SearchTerm
+	for _, term := range metrics.PopularTerms {
+		popularTerms = append(popularTerms, SearchTerm{
+			Term:      term.Term,
+			Frequency: term.Frequency,
+		})
+	}
+	
+	return &SearchAnalyticsResponse{
+		TotalSearches:       metrics.TotalSearches,
+		AverageResults:      metrics.AverageResults,
+		ZeroResultsRate:     metrics.ZeroResultsRate,
+		AverageResponseTime: metrics.AverageResponseTime.String(),
+		PopularTerms:        popularTerms,
+	}, nil
+}
+
+// BulkIndexProducts indexes multiple products in Elasticsearch
+func (s *ProductService) BulkIndexProducts(ctx context.Context, productIDs []string) error {
+	if s.searchService == nil {
+		return utils.NewInternalError("search service not available", nil)
+	}
+	
+	// Fetch products from database
+	var products []*models.Product
+	for _, id := range productIDs {
+		product, err := s.productRepo.GetByID(ctx, id)
+		if err != nil {
+			utils.Logger.Error(ctx, "Failed to fetch product for indexing", err, map[string]interface{}{
+				"product_id": id,
+			})
+			continue
+		}
+		products = append(products, product)
+	}
+	
+	if len(products) == 0 {
+		return utils.NewValidationError("no valid products found for indexing")
+	}
+	
+	return s.searchService.BulkIndexProducts(ctx, products)
+}
+
+// ReindexAllProducts reindexes all products in Elasticsearch
+func (s *ProductService) ReindexAllProducts(ctx context.Context) error {
+	if s.searchService == nil {
+		return utils.NewInternalError("search service not available", nil)
+	}
+	
+	// Fetch all products in batches
+	const batchSize = 100
+	offset := 0
+	
+	for {
+		filter := repository.ProductFilter{
+			Limit:  batchSize,
+			Offset: offset,
+		}
+		
+		products, total, err := s.productRepo.List(ctx, filter)
+		if err != nil {
+			return err
+		}
+		
+		if len(products) == 0 {
+			break
+		}
+		
+		// Index batch
+		if err := s.searchService.BulkIndexProducts(ctx, products); err != nil {
+			return err
+		}
+		
+		offset += batchSize
+		
+		// Break if we've processed all products
+		if offset >= total {
+			break
+		}
+	}
+	
+	return nil
+}
+
+// convertSortFields converts service sort fields to search sort fields
+func convertSortFields(sorts []SortField) []search.SortField {
+	var searchSorts []search.SortField
+	for _, sort := range sorts {
+		searchSorts = append(searchSorts, search.SortField{
+			Field: sort.Field,
+			Order: sort.Order,
+		})
+	}
+	return searchSorts
 }

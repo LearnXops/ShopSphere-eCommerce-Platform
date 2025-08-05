@@ -5,10 +5,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/shopsphere/product-service/internal/handlers"
 	"github.com/shopsphere/product-service/internal/repository"
+	"github.com/shopsphere/product-service/internal/search"
 	"github.com/shopsphere/product-service/internal/service"
 	"github.com/shopsphere/shared/utils"
 )
@@ -33,8 +35,35 @@ func main() {
 	productRepo := repository.NewProductRepository(db)
 	categoryRepo := repository.NewCategoryRepository(db)
 
+	// Initialize Elasticsearch client
+	var searchService search.SearchService
+	var analyticsService search.SearchAnalytics
+	
+	elasticsearchURL := os.Getenv("ELASTICSEARCH_URL")
+	if elasticsearchURL == "" {
+		elasticsearchURL = "http://localhost:9200"
+	}
+	
+	addresses := strings.Split(elasticsearchURL, ",")
+	esClient, err := search.NewElasticsearchClient(addresses)
+	if err != nil {
+		utils.Logger.Error(ctx, "Failed to initialize Elasticsearch client", err, map[string]interface{}{
+			"elasticsearch_url": elasticsearchURL,
+		})
+		// Continue without search service - will fallback to database search
+		searchService = nil
+	} else {
+		searchService = esClient
+		utils.Logger.Info(ctx, "Elasticsearch client initialized successfully", map[string]interface{}{
+			"elasticsearch_url": elasticsearchURL,
+		})
+	}
+	
+	// Initialize analytics service
+	analyticsService = search.NewAnalyticsService(db)
+
 	// Initialize services
-	productService := service.NewProductService(productRepo, categoryRepo)
+	productService := service.NewProductService(productRepo, categoryRepo, searchService, analyticsService)
 	categoryService := service.NewCategoryService(categoryRepo)
 
 	// Initialize handlers
@@ -56,6 +85,11 @@ func main() {
 	productRoutes.HandleFunc("", productHandler.ListProducts).Methods("GET")
 	productRoutes.HandleFunc("", productHandler.CreateProduct).Methods("POST")
 	productRoutes.HandleFunc("/search", productHandler.SearchProducts).Methods("GET")
+	productRoutes.HandleFunc("/search/advanced", productHandler.AdvancedSearch).Methods("POST")
+	productRoutes.HandleFunc("/search/suggestions", productHandler.GetSearchSuggestions).Methods("GET")
+	productRoutes.HandleFunc("/search/analytics", productHandler.GetSearchAnalytics).Methods("GET")
+	productRoutes.HandleFunc("/search/reindex", productHandler.BulkIndexProducts).Methods("POST")
+	productRoutes.HandleFunc("/search/reindex-all", productHandler.ReindexAllProducts).Methods("POST")
 	productRoutes.HandleFunc("/bulk-stock-update", productHandler.BulkUpdateStock).Methods("POST")
 	productRoutes.HandleFunc("/sku/{sku}", productHandler.GetProductBySKU).Methods("GET")
 	productRoutes.HandleFunc("/{id}", productHandler.GetProduct).Methods("GET")

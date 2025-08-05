@@ -96,17 +96,86 @@ type ListProductsResponse struct {
 
 // SearchProductsRequest represents a request to search products
 type SearchProductsRequest struct {
-	Query      string   `json:"query" validate:"required"`
-	CategoryID string   `json:"category_id"`
-	Status     string   `json:"status"`
-	MinPrice   *float64 `json:"min_price"`
-	MaxPrice   *float64 `json:"max_price"`
-	Featured   *bool    `json:"featured"`
-	InStock    *bool    `json:"in_stock"`
-	Limit      int      `json:"limit"`
-	Offset     int      `json:"offset"`
-	SortBy     string   `json:"sort_by"`
-	SortOrder  string   `json:"sort_order"`
+	Query      string            `json:"query" validate:"required"`
+	CategoryID string            `json:"category_id"`
+	Status     string            `json:"status"`
+	MinPrice   *float64          `json:"min_price"`
+	MaxPrice   *float64          `json:"max_price"`
+	Featured   *bool             `json:"featured"`
+	InStock    *bool             `json:"in_stock"`
+	Brand      string            `json:"brand"`
+	Color      string            `json:"color"`
+	Size       string            `json:"size"`
+	Filters    map[string]interface{} `json:"filters"`
+	Facets     []string          `json:"facets"`
+	Limit      int               `json:"limit"`
+	Offset     int               `json:"offset"`
+	SortBy     string            `json:"sort_by"`
+	SortOrder  string            `json:"sort_order"`
+}
+
+// AdvancedSearchRequest represents an advanced search request with facets
+type AdvancedSearchRequest struct {
+	Query      string                 `json:"query"`
+	Filters    map[string]interface{} `json:"filters"`
+	Facets     []string               `json:"facets"`
+	Sort       []SortField            `json:"sort"`
+	From       int                    `json:"from"`
+	Size       int                    `json:"size"`
+}
+
+// SortField represents a sort field
+type SortField struct {
+	Field string `json:"field"`
+	Order string `json:"order"` // asc or desc
+}
+
+// AdvancedSearchResponse represents an advanced search response
+type AdvancedSearchResponse struct {
+	Products []*models.Product          `json:"products"`
+	Total    int64                      `json:"total"`
+	Facets   map[string][]FacetValue    `json:"facets"`
+	From     int                        `json:"from"`
+	Size     int                        `json:"size"`
+}
+
+// FacetValue represents a facet value with count
+type FacetValue struct {
+	Value string `json:"value"`
+	Count int64  `json:"count"`
+}
+
+// SearchSuggestionsRequest represents a request for search suggestions
+type SearchSuggestionsRequest struct {
+	Query string `json:"query" validate:"required"`
+	Size  int    `json:"size"`
+}
+
+// SearchSuggestionsResponse represents a response for search suggestions
+type SearchSuggestionsResponse struct {
+	Suggestions []string `json:"suggestions"`
+}
+
+// SearchAnalyticsRequest represents a request for search analytics
+type SearchAnalyticsRequest struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Limit int    `json:"limit"`
+}
+
+// SearchAnalyticsResponse represents a response for search analytics
+type SearchAnalyticsResponse struct {
+	TotalSearches       int64        `json:"total_searches"`
+	AverageResults      float64      `json:"average_results"`
+	ZeroResultsRate     float64      `json:"zero_results_rate"`
+	AverageResponseTime string       `json:"average_response_time"`
+	PopularTerms        []SearchTerm `json:"popular_terms"`
+}
+
+// SearchTerm represents a search term with frequency
+type SearchTerm struct {
+	Term      string `json:"term"`
+	Frequency int    `json:"frequency"`
 }
 
 // BulkStockUpdate represents a bulk stock update operation

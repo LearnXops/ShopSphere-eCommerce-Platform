@@ -362,3 +362,128 @@ func (h *ProductHandler) getTraceID(w http.ResponseWriter) string {
 	// For now, return a placeholder
 	return "trace-12345"
 }
+
+// AdvancedSearch handles POST /products/search/advanced
+func (h *ProductHandler) AdvancedSearch(w http.ResponseWriter, r *http.Request) {
+	var req service.AdvancedSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body", "")
+		return
+	}
+	
+	result, err := h.productService.AdvancedSearch(r.Context(), req)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	
+	h.writeJSONResponse(w, http.StatusOK, result)
+}
+
+// GetSearchSuggestions handles GET /products/search/suggestions
+func (h *ProductHandler) GetSearchSuggestions(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "VALIDATION_ERROR", "Query parameter 'q' is required", "")
+		return
+	}
+	
+	sizeStr := r.URL.Query().Get("size")
+	size := 10
+	if sizeStr != "" {
+		if s, err := strconv.Atoi(sizeStr); err == nil && s > 0 {
+			size = s
+		}
+	}
+	
+	req := service.SearchSuggestionsRequest{
+		Query: query,
+		Size:  size,
+	}
+	
+	result, err := h.productService.GetSearchSuggestions(r.Context(), req)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	
+	h.writeJSONResponse(w, http.StatusOK, result)
+}
+
+// GetSearchAnalytics handles GET /products/search/analytics
+func (h *ProductHandler) GetSearchAnalytics(w http.ResponseWriter, r *http.Request) {
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	
+	if from == "" || to == "" {
+		h.writeErrorResponse(w, http.StatusBadRequest, "VALIDATION_ERROR", "Both 'from' and 'to' query parameters are required", "")
+		return
+	}
+	
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	
+	req := service.SearchAnalyticsRequest{
+		From:  from,
+		To:    to,
+		Limit: limit,
+	}
+	
+	result, err := h.productService.GetSearchAnalytics(r.Context(), req)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	
+	h.writeJSONResponse(w, http.StatusOK, result)
+}
+
+// BulkIndexProducts handles POST /products/search/reindex
+func (h *ProductHandler) BulkIndexProducts(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ProductIDs []string `json:"product_ids"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeErrorResponse(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid request body", "")
+		return
+	}
+	
+	if len(req.ProductIDs) == 0 {
+		h.writeErrorResponse(w, http.StatusBadRequest, "VALIDATION_ERROR", "At least one product ID is required", "")
+		return
+	}
+	
+	err := h.productService.BulkIndexProducts(r.Context(), req.ProductIDs)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	
+	response := map[string]interface{}{
+		"message": "Products indexed successfully",
+		"count":   len(req.ProductIDs),
+	}
+	
+	h.writeJSONResponse(w, http.StatusOK, response)
+}
+
+// ReindexAllProducts handles POST /products/search/reindex-all
+func (h *ProductHandler) ReindexAllProducts(w http.ResponseWriter, r *http.Request) {
+	err := h.productService.ReindexAllProducts(r.Context())
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+	
+	response := map[string]interface{}{
+		"message": "All products reindexed successfully",
+	}
+	
+	h.writeJSONResponse(w, http.StatusOK, response)
+}
