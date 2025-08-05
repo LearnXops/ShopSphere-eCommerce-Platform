@@ -30,6 +30,7 @@ type Product struct {
 	Status      ProductStatus     `json:"status" db:"status"`
 	Images      []string          `json:"images" db:"images"`
 	Attributes  ProductAttributes `json:"attributes" db:"attributes"`
+	Featured    bool              `json:"featured" db:"featured"`
 	CreatedAt   time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at" db:"updated_at"`
 }
@@ -66,6 +67,19 @@ func NewProduct(sku, name, description, categoryID string, price decimal.Decimal
 		Status:      ProductInactive,
 		Images:      []string{},
 		Attributes:  ProductAttributes{Custom: make(map[string]interface{})},
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+}
+
+// NewCategory creates a new category with default values
+func NewCategory(name, description string, parentID *string) *Category {
+	return &Category{
+		ID:          uuid.New().String(),
+		Name:        name,
+		Description: description,
+		ParentID:    parentID,
+		IsActive:    true,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
