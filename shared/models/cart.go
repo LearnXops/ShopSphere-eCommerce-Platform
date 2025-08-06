@@ -78,11 +78,69 @@ func (c *Cart) AddItem(productID, sku, name string, price decimal.Decimal, quant
 	c.calculateSubtotal()
 }
 
-// calculateSubtotal calculates the cart subtotal
-func (c *Cart) calculateSubtotal() {
+// CalculateSubtotal calculates the cart subtotal
+func (c *Cart) CalculateSubtotal() {
 	subtotal := decimal.Zero
 	for _, item := range c.Items {
 		subtotal = subtotal.Add(item.Total)
 	}
 	c.Subtotal = subtotal
+}
+
+// calculateSubtotal calculates the cart subtotal (private method for backward compatibility)
+func (c *Cart) calculateSubtotal() {
+	c.CalculateSubtotal()
+}
+
+// UpdateItem updates an existing item in the cart
+func (c *Cart) UpdateItem(productID string, quantity int) bool {
+	for i, item := range c.Items {
+		if item.ProductID == productID {
+			if quantity <= 0 {
+				// Remove item if quantity is 0 or negative
+				c.Items = append(c.Items[:i], c.Items[i+1:]...)
+			} else {
+				c.Items[i].Quantity = quantity
+				c.Items[i].Total = item.Price.Mul(decimal.NewFromInt(int64(quantity)))
+				c.Items[i].UpdatedAt = time.Now()
+			}
+			c.UpdatedAt = time.Now()
+			c.CalculateSubtotal()
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveItem removes an item from the cart
+func (c *Cart) RemoveItem(productID string) bool {
+	for i, item := range c.Items {
+		if item.ProductID == productID {
+			c.Items = append(c.Items[:i], c.Items[i+1:]...)
+			c.UpdatedAt = time.Now()
+			c.CalculateSubtotal()
+			return true
+		}
+	}
+	return false
+}
+
+// GetItemCount returns the total number of items in the cart
+func (c *Cart) GetItemCount() int {
+	count := 0
+	for _, item := range c.Items {
+		count += item.Quantity
+	}
+	return count
+}
+
+// IsExpired checks if the cart has expired
+func (c *Cart) IsExpired() bool {
+	return time.Now().After(c.ExpiresAt)
+}
+
+// ExtendExpiry extends the cart expiry by the given duration
+func (c *Cart) ExtendExpiry(duration time.Duration) {
+	c.ExpiresAt = c.ExpiresAt.Add(duration)
+	c.UpdatedAt = time.Now()
 }
