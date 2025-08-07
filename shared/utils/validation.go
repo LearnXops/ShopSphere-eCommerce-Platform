@@ -17,6 +17,11 @@ type ValidationError struct {
 	Value   interface{} `json:"value,omitempty"`
 }
 
+// Error implements the error interface for ValidationError
+func (ve ValidationError) Error() string {
+	return fmt.Sprintf("%s: %s", ve.Field, ve.Message)
+}
+
 // ValidationErrors represents multiple validation errors
 type ValidationErrors []ValidationError
 
