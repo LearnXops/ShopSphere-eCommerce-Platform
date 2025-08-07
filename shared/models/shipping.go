@@ -44,19 +44,7 @@ const (
 	ServicePriority    ServiceType = "PRIORITY"
 )
 
-// Address represents a shipping address
-type Address struct {
-	Name         string `json:"name" db:"name"`
-	Company      string `json:"company,omitempty" db:"company"`
-	AddressLine1 string `json:"address_line_1" db:"address_line_1"`
-	AddressLine2 string `json:"address_line_2,omitempty" db:"address_line_2"`
-	City         string `json:"city" db:"city"`
-	State        string `json:"state" db:"state"`
-	PostalCode   string `json:"postal_code" db:"postal_code"`
-	Country      string `json:"country" db:"country"`
-	Phone        string `json:"phone,omitempty" db:"phone"`
-	Email        string `json:"email,omitempty" db:"email"`
-}
+// Note: Address struct is defined in user.go to avoid duplication
 
 // PackageDimensions represents package dimensions
 type PackageDimensions struct {
